@@ -32,3 +32,8 @@ repos:
         entry: /usr/bin/env bash -c
         args: ['([[ ! -d "examples" ]] || for example in $(find . -path "./examples/*.py"); do pylint --disable=missing-docstring,invalid-name,consider-using-f-string $example; done)']
         language: system
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v0.910
+    hooks:
+    -   id: mypy
+        exclude: "^(docs/|examples/$)"

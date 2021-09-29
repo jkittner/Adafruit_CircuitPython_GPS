@@ -28,12 +28,23 @@ Implementation Notes
 """
 import time
 from micropython import const
+from serial.serialposix import Serial
+from busio import UART
+
+try:
+    from typing import Optional
+    from typing import List
+    from typing import Tuple
+    from typing import Union
+    from typing import Dict
+except ImportError:
+    pass
 
 __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_GPS.git"
 
 
-_GPSI2C_DEFAULT_ADDRESS = const(0x10)
+_GPSI2C_DEFAULT_ADDRESS: int = const(0x10)
 
 _GLL = 0
 _RMC = 1
@@ -75,7 +86,7 @@ _SENTENCE_PARAMS = (
 # Internal helper parsing functions.
 # These handle input that might be none or null and return none instead of
 # throwing errors.
-def _parse_degrees(nmea_data):
+def _parse_degrees(nmea_data: Optional[str]) -> Optional[float]:
     # Parse a NMEA lat/long data pair 'dddmm.mmmm' into a pure degrees value.
     # Where ddd is the degrees, mm.mmmm is the minutes.
     if nmea_data is None or len(nmea_data) < 3:
@@ -86,32 +97,32 @@ def _parse_degrees(nmea_data):
     return deg + minutes / 60
 
 
-def _parse_int(nmea_data):
+def _parse_int(nmea_data: Optional[str]) -> Optional[int]:
     if nmea_data is None or nmea_data == "":
         return None
     return int(nmea_data)
 
 
-def _parse_float(nmea_data):
+def _parse_float(nmea_data: Optional[str]) -> Optional[float]:
     if nmea_data is None or nmea_data == "":
         return None
     return float(nmea_data)
 
 
-def _parse_str(nmea_data):
+def _parse_str(nmea_data: Optional[str]) -> Optional[str]:
     if nmea_data is None or nmea_data == "":
         return None
     return str(nmea_data)
 
 
-def _read_degrees(data, index, neg):
+def _read_degrees(data: List[Union[int, float, str]], index: int, neg: str) -> float:
     x = data[index]
     if data[index + 1].lower() == neg:
         x *= -1.0
     return x
 
 
-def _parse_talker(data_type):
+def _parse_talker(data_type: bytes) -> Tuple[bytes, bytes]:
     # Split the data_type into talker and sentence_type
     if data_type[0] == b"P":  # Proprietary codes
         return (data_type[:1], data_type[1:])
@@ -119,7 +130,9 @@ def _parse_talker(data_type):
     return (data_type[:2], data_type[2:])
 
 
-def _parse_data(sentence_type, data):
+def _parse_data(
+    sentence_type: int, data: List[str]
+) -> Optional[List[Union[int, float, str, None]]]:
     """Parse sentence data for the specified sentence type and
     return a list of parameters in the correct format, or return None.
     """
@@ -135,7 +148,7 @@ def _parse_data(sentence_type, data):
         # The expected number does not match the number of data items
         return None
 
-    params = []
+    params: List[Union[int, float, str, None]] = []
     try:
         for i, dti in enumerate(data):
             pti = param_types[i]
@@ -203,39 +216,40 @@ class GPS:
     GPS modules to read latitude, longitude, and more.
     """
 
-    def __init__(self, uart, debug=False):
+    def __init__(self, uart: Union[Serial, UART], debug: bool = False) -> None:
         self._uart = uart
         # Initialize null starting values for GPS attributes.
-        self.timestamp_utc = None
-        self.latitude = None
-        self.longitude = None
-        self.fix_quality = 0
-        self.fix_quality_3d = 0
-        self.satellites = None
-        self.satellites_prev = None
-        self.horizontal_dilution = None
-        self.altitude_m = None
-        self.height_geoid = None
-        self.speed_knots = None
-        self.track_angle_deg = None
-        self._sats = None  # Temporary holder for information from GSV messages
-        self.sats = None  # Completed information from GSV messages
-        self.isactivedata = None
+        self.timestamp_utc: Optional[time.struct_time] = None
+        self.latitude: Optional[float] = None
+        self.longitude: Optional[float] = None
+        self.fix_quality: Optional[int] = 0
+        self.fix_quality_3d: Optional[int] = 0
+        self.satellites: Optional[int] = None
+        self.satellites_prev: Optional[int] = None
+        self.horizontal_dilution: Optional[float] = None
+        self.altitude_m: Optional[float] = None
+        self.height_geoid: Optional[float] = None
+        self.speed_knots: Optional[float] = None
+        self.track_angle_deg: Optional[float] = None
+        self._sats: Optional[List[Tuple[str, float, float, float, float]]] = None  # Temporary holder for information from GSV messages
+        # TODO: type is not clear...
+        self.sats: Optional[Dict[Union[int, str], str]] = None  # Completed information from GSV messages
+        self.isactivedata: Optional[str] = None
         self.true_track = None
         self.mag_track = None
-        self.sat_prns = None
-        self.sel_mode = None
-        self.pdop = None
-        self.hdop = None
-        self.vdop = None
-        self.total_mess_num = None
-        self.mess_num = None
-        self._raw_sentence = None
-        self._mode_indicator = None
-        self._magnetic_variation = None
+        self.sat_prns: Optional[List[str]] = None
+        self.sel_mode: Optional[str] = None
+        self.pdop: Optional[float] = None
+        self.hdop: Optional[float] = None
+        self.vdop: Optional[float] = None
+        self.total_mess_num: Optional[int] = None
+        self.mess_num: Optional[int] = None
+        self._raw_sentence: Optional[str] = None
+        self._mode_indicator: Optional[str] = None
+        self._magnetic_variation: Optional[float] = None
         self.debug = debug
 
-    def update(self):
+    def update(self) -> Optional[bool]:
         """Check for updated data from the GPS module and process it
         accordingly.  Returns True if new data was processed, and False if
         nothing new was received.
@@ -251,11 +265,11 @@ class GPS:
             return False
         if self.debug:
             print(sentence)
-        data_type, args = sentence
+        data_type, args_raw = sentence
         if len(data_type) < 5:
             return False
         data_type = bytes(data_type.upper(), "ascii")
-        (talker, sentence_type) = _parse_talker(data_type)
+        talker, sentence_type = _parse_talker(data_type)
 
         # Check for all currently known GNSS talkers
         # GA - Galileo
@@ -271,7 +285,7 @@ class GPS:
             return True
 
         result = True
-        args = args.split(",")
+        args = args_raw.split(",")
         if sentence_type == b"GLL":  # Geographic position - Latitude/Longitude
             result = self._parse_gll(args)
         elif sentence_type == b"RMC":  # Minimum location info
@@ -285,7 +299,7 @@ class GPS:
 
         return result
 
-    def send_command(self, command, add_checksum=True):
+    def send_command(self, command: bytes, add_checksum=True) -> None:
         """Send a command string to the GPS.  If add_checksum is True (the
         default) a NMEA checksum will automatically be computed and added.
         Note you should NOT add the leading $ and trailing * to the command
@@ -302,48 +316,48 @@ class GPS:
         self.write(b"\r\n")
 
     @property
-    def has_fix(self):
+    def has_fix(self) -> bool:
         """True if a current fix for location information is available."""
         return self.fix_quality is not None and self.fix_quality >= 1
 
     @property
-    def has_3d_fix(self):
+    def has_3d_fix(self) -> bool:
         """Returns true if there is a 3d fix available.
         use has_fix to determine if a 2d fix is available,
         passing it the same data"""
         return self.fix_quality_3d is not None and self.fix_quality_3d >= 2
 
     @property
-    def datetime(self):
+    def datetime(self) -> Optional[time.struct_time]:
         """Return struct_time object to feed rtc.set_time_source() function"""
         return self.timestamp_utc
 
     @property
-    def nmea_sentence(self):
+    def nmea_sentence(self) -> Optional[str]:
         """Return raw_sentence which is the raw NMEA sentence read from the GPS"""
         return self._raw_sentence
 
-    def read(self, num_bytes):
+    def read(self, num_bytes: int) -> bytes:
         """Read up to num_bytes of data from the GPS directly, without parsing.
         Returns a bytearray with up to num_bytes or None if nothing was read"""
         return self._uart.read(num_bytes)
 
-    def write(self, bytestr):
+    def write(self, bytestr: bytes) -> int:
         """Write a bytestring data to the GPS directly, without parsing
         or checksums"""
         return self._uart.write(bytestr)
 
     @property
-    def in_waiting(self):
+    def in_waiting(self) -> int:
         """Returns number of bytes available in UART read buffer"""
         return self._uart.in_waiting
 
-    def readline(self):
+    def readline(self) -> bytes:
         """Returns a newline terminated bytearray, must have timeout set for
         the underlying UART or this will block forever!"""
         return self._uart.readline()
 
-    def _read_sentence(self):
+    def _read_sentence(self) -> Optional[str]:
         # Parse any NMEA sentence that is available.
         # pylint: disable=len-as-condition
         # This needs to be refactored when it can be tested.
@@ -356,27 +370,27 @@ class GPS:
         if sentence is None or sentence == b"" or len(sentence) < 1:
             return None
         try:
-            sentence = str(sentence, "ascii").strip()
+            sentence_str = str(sentence, "ascii").strip()
         except UnicodeError:
             return None
         # Look for a checksum and validate it if present.
-        if len(sentence) > 7 and sentence[-3] == "*":
+        if len(sentence_str) > 7 and sentence_str[-3] == "*":
             # Get included checksum, then calculate it and compare.
-            expected = int(sentence[-2:], 16)
+            expected = int(sentence_str[-2:], 16)
             actual = 0
-            for i in range(1, len(sentence) - 3):
-                actual ^= ord(sentence[i])
+            for i in range(1, len(sentence_str) - 3):
+                actual ^= ord(sentence_str[i])
             if actual != expected:
                 return None  # Failed to validate checksum.
 
             # copy the raw sentence
-            self._raw_sentence = sentence
+            self._raw_sentence = sentence_str
 
-            return sentence
+            return sentence_str
         # At this point we don't have a valid sentence
         return None
 
-    def _parse_sentence(self):
+    def _parse_sentence(self) -> Optional[Tuple[str, str]]:
         sentence = self._read_sentence()
 
         # sentence is a valid NMEA with a valid checksum
@@ -393,7 +407,7 @@ class GPS:
         data_type = sentence[1:delimiter]
         return (data_type, sentence[delimiter + 1 :])
 
-    def _update_timestamp_utc(self, time_utc, date=None):
+    def _update_timestamp_utc(self, time_utc: int, date: Optional[int] = None) -> None:
         hours = time_utc // 10000
         mins = (time_utc // 100) % 100
         secs = time_utc % 100
@@ -413,7 +427,7 @@ class GPS:
             (year, month, day, hours, mins, secs, 0, 0, -1)
         )
 
-    def _parse_gll(self, data):
+    def _parse_gll(self, data: Optional[List[str]]) -> bool:
         # GLL - Geographic Position - Latitude/Longitude
 
         if data is None or len(data) != 7:
@@ -439,7 +453,7 @@ class GPS:
 
         return True
 
-    def _parse_rmc(self, data):
+    def _parse_rmc(self, data: Optional[List[str]]) -> bool:
         # RMC - Recommended Minimum Navigation Information
 
         if data is None or len(data) not in (12, 13):
@@ -483,7 +497,7 @@ class GPS:
 
         return True
 
-    def _parse_gga(self, data):
+    def _parse_gga(self, data: Optional[List[str]]) -> bool:
         # GGA - Global Positioning System Fix Data
 
         if data is None or len(data) != 14:
@@ -533,7 +547,7 @@ class GPS:
 
         return True
 
-    def _parse_gsa(self, talker, data):
+    def _parse_gsa(self, talker: bytes, data: Optional[List[str]]) -> bool:
         # GSA - GPS DOP and active satellites
 
         if data is None or len(data) not in (17, 18):
@@ -572,7 +586,7 @@ class GPS:
 
         return True
 
-    def _parse_gsv(self, talker, data):
+    def _parse_gsv(self, talker: bytes, data: Optional[List[str]]) -> bool:
         # GSV - Satellites in view
         # pylint: disable=too-many-branches
 
@@ -585,7 +599,7 @@ class GPS:
         if data is None:
             return False  # Params didn't parse
 
-        talker = talker.decode("ascii")
+        talker_str = talker.decode("ascii")
 
         # Number of messages
         self.total_mess_num = data[0]
@@ -596,13 +610,13 @@ class GPS:
 
         sat_tup = data[3:]
 
-        satlist = []
+        satlist: List[Tuple[str, float, float, float, float]] = []
         timestamp = time.monotonic()
         for i in range(len(sat_tup) // 4):
             j = i * 4
             value = (
                 # Satellite number
-                "{}{}".format(talker, sat_tup[0 + j]),
+                "{}{}".format(talker_str, sat_tup[0 + j]),
                 # Elevation in degrees
                 sat_tup[1 + j],
                 # Azimuth in degrees
@@ -651,18 +665,23 @@ class GPS_GtopI2C(GPS):
     """
 
     def __init__(
-        self, i2c_bus, *, address=_GPSI2C_DEFAULT_ADDRESS, debug=False, timeout=5
-    ):
+        self,
+        i2c_bus,
+        *,
+        address: int = _GPSI2C_DEFAULT_ADDRESS,
+        debug: bool = False,
+        timeout: int = 5,
+    ) -> None:
         import adafruit_bus_device.i2c_device as i2c_device  # pylint: disable=import-outside-toplevel
 
         super().__init__(None, debug)  # init the parent with no UART
         self._i2c = i2c_device.I2CDevice(i2c_bus, address)
         self._lastbyte = None
         self._charbuff = bytearray(1)
-        self._internalbuffer = []
+        self._internalbuffer: List[int] = []
         self._timeout = timeout
 
-    def read(self, num_bytes=1):
+    def read(self, num_bytes: int = 1) -> bytearray:
         """Read up to num_bytes of data from the GPS directly, without parsing.
         Returns a bytearray with up to num_bytes or None if nothing was read"""
         result = []
@@ -678,19 +697,19 @@ class GPS_GtopI2C(GPS):
                 self._lastbyte = char  # keep track of the last character approved
         return bytearray(result)
 
-    def write(self, bytestr):
+    def write(self, bytestr: bytes) -> None:
         """Write a bytestring data to the GPS directly, without parsing
         or checksums"""
         with self._i2c as i2c:
             i2c.write(bytestr)
 
     @property
-    def in_waiting(self):
+    def in_waiting(self) -> int:
         """Returns number of bytes available in UART read buffer, always 16
         since I2C does not have the ability to know how much data is available"""
         return 16
 
-    def readline(self):
+    def readline(self) -> Optional[bytearray]:
         """Returns a newline terminated bytearray, must have timeout set for
         the underlying UART or this will block forever!"""
         timeout = time.monotonic() + self._timeout
